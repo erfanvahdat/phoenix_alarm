@@ -1,17 +1,19 @@
 
 
 import pandas as pd
+from colorama import Fore
 from email import encoders
 import email, smtplib, ssl
 from termcolor import colored
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from colorama import Fore
-def gmail(ticker,pos_type,utils=None,status=None,attach_file=None ):
+
+def gmail(ticker,pos_type,rsi,utils=None,status=None,attach_file=None ):
+
 
     # subject = f"RSI Alert for {Fore.GREEN}{ticker}+USDT {Fore.WHITE} ON {Fore.MAGENTA}{pos_type}"
-    subject = f'RSI Alert for {ticker}USDT ON {pos_type}'
+    subject = f'RSI Alert for {ticker}...'
     body = """\ 
         This is an email with attachment sent from Python
         <b>This line is bold.</b>
@@ -41,7 +43,10 @@ def gmail(ticker,pos_type,utils=None,status=None,attach_file=None ):
             <body>
                 
             <div>
-            <span style="color: #000000 ; font-size: 18px;">Hello </span><br>
+
+
+            
+            <span style="color: #000000 ; font-size: 18px;">{ticker} reached {rsi} to Get {pos_type} </span><br>
             
                 <div/>
             </body>
@@ -101,4 +106,4 @@ def gmail(ticker,pos_type,utils=None,status=None,attach_file=None ):
 
 
 
-gmail(ticker='BTC',pos_type = 'short')
+# gmail(ticker='BTC',pos_type = 'short',rsi=70)
