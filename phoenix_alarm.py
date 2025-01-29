@@ -1,51 +1,109 @@
-import threading
 import time
-from colorama import Fore
-import pandas as pd
 import random
-from ohlc_api import mexi
+import threading
+import pandas as pd
+from queue import Queue
+from gmail import gmail
+from colorama import Fore
+from ohlc_api import mexi, forex
+from concurrent.futures import ThreadPoolExecutor
 
 # Shared state
 shared_data = {}
 lock = threading.Lock()
 
+# Thread pool executor
+executor = ThreadPoolExecutor(max_workers=10)  # Adjust max_workers as needed
+
+# Queue for input processing
+input_queue = Queue()
+
+forex_pair = ["GBPUSD", "EURUSD", "AUDUSD", "USDCAD", "USDJPY", "GBPJPY", "NZDUSD"]
+
+
+def define_symbol_market_data(ticker, timeframe):
+    try:
+
+        if ticker.upper() in forex_pair:
+            data = forex(ticker="GBPUSD=X", timeframe=5)
+        else:
+            data = mexi(ticker=ticker, limit=10000, timeframe=timeframe)
+
+        if len(data) != 0:
+
+            return data
+        else:
+            print(
+                Fore.RED(),
+                "data_fetching got an error",
+                Fore.WHITE(),
+            )
+    except:
+        print(Fore.RED(), "we have an error with defining ticker_name!!!", Fore.WHITE())
+
+
 # RSI tracking function
 def track_rsi(ticker, timeframe, type_pos, set_rsi, start_point, id):
-    # print(f"{Fore.CYAN}Started tracking RSI for {ticker} ({type_pos}) with threshold {set_rsi}.{Fore.WHITE}")
-    data = mexi(ticker=ticker, limit=10000, timeframe=timeframe)  # Simulated RSI data
-    sample = data.loc[start_point:]
+    try:
 
-    alarm_triggered = False
+        # Simulate fetching RSI data
+        data = define_symbol_market_data(ticker=ticker, timeframe=timeframe)
+        sample = data.loc[start_point:]
 
-    # Loop through each index of the sliced data
-    for i in sample.index:
-        rsi = sample.loc[i]['rsi']
+        alarm_triggered = False
 
-        if type_pos.upper() == 'SHORT' and rsi > set_rsi:
-            print(f"{Fore.GREEN}RSI alarm triggered for {ticker} ({type_pos}) on {i}: RSI={rsi:.2f}{Fore.WHITE}")
-            alarm_triggered = True
-            break
-        elif type_pos.upper() == 'LONG' and rsi < set_rsi:
-            print(f"{Fore.GREEN}RSI alarm triggered for {ticker} ({type_pos}) on {i}: RSI={rsi:.2f}{Fore.WHITE}")
-            alarm_triggered = True
-            break
+        # Loop through each index of the sliced data
+        for i in sample.index:
+            rsi = sample.loc[i]["rsi"]
 
-    if alarm_triggered:
-        print(f"{Fore.YELLOW}RSI alarm triggered, deleting {ticker} entry with id[{id}].{Fore.WHITE}")
-        with lock:
-            if ticker in shared_data:
-                shared_data[ticker] = [item for item in shared_data[ticker] if item['id'] != id]
-                if len(shared_data[ticker]) == 0:
-                    del shared_data[ticker]
-    else:
-        print(f"{Fore.YELLOW}No RSI alarm triggered for {ticker} within the dataset.{Fore.WHITE}")
+            if type_pos.upper() == "SHORT" and rsi >= set_rsi:
+                print(
+                    f"{Fore.GREEN}RSI alarm triggered for {ticker} ({type_pos}) on {i}: RSI={rsi:.2f}{Fore.WHITE}"
+                )
+                alarm_triggered = True
+                break
+            elif type_pos.upper() == "LONG" and rsi <= set_rsi:
+                print(
+                    f"{Fore.GREEN}RSI alarm triggered for {ticker} ({type_pos}) on {i}: RSI={rsi:.2f}{Fore.WHITE}"
+                )
+                alarm_triggered = True
+                break
 
-# Listener function: Listens for user input
+        if alarm_triggered:
+            print(
+                f"{Fore.GREEN}RSI alarm triggered, deleting {ticker} entry with id[{id}].{Fore.WHITE}"
+            )
+            with lock:
+                # Send email for more information and further investigation
+                gmail(ticker=ticker, pos_type=type_pos, rsi=set_rsi)
+
+                # Delete the triggered alarm
+                if ticker in shared_data:
+                    shared_data[ticker] = [
+                        item for item in shared_data[ticker] if item["id"] != id
+                    ]
+                    if len(shared_data[ticker]) == 0:
+                        del shared_data[ticker]
+        else:
+            print(
+                f"{Fore.YELLOW}No RSI alarm triggered for {ticker} within the dataset.{Fore.WHITE}"
+            )
+
+    except Exception as e:
+        print(f"{Fore.RED}Error in track_rsi for {ticker}: {e}{Fore.WHITE}")
+
+
+# Listener function: Enqueue user inputs
 def listener():
     while True:
         user_input = input("Enter a Ticker (e.g., TICKER TIMEFRAME TYPE RSI): ").strip()
+        input_queue.put(user_input)
 
 
+# Worker function: Process inputs from the queue
+def worker():
+    while True:
+        user_input = input_queue.get()  # Get the next input
         if user_input.lower().startswith("delete "):
             _, key_to_delete = user_input.split(maxsplit=1)
             with lock:
@@ -54,66 +112,124 @@ def listener():
                     print(f"Deleted: {key_to_delete}")
                 else:
                     print(f"Key '{key_to_delete}' not found.")
+        else:
+            try:
+                random_id = random.randint(1000, 9999)
+                with lock:
+                    key, timeframe, type_pos, rsi_value = user_input.split()
+                    timeframe = int(timeframe)
+                    rsi_value = float(rsi_value)
 
-            continue
-        
-        try:
-        
-            # Generate a random ID
-            random_id = random.randint(1000, 9999)
+                    data = define_symbol_market_data(ticker=key, timeframe=timeframe)
+                    start_point = data.index[-1]
 
-            # Add ticker entry to shared data with a random ID
-            with lock:  # Lock to avoid race conditions
+                    if key not in shared_data:
+                        shared_data[key] = []
 
-                # Parse input for RSI tracking
-                key, timeframe, type_pos, rsi_value = user_input.split()    
-                timeframe = int(timeframe)
-                rsi_value = float(rsi_value)
-                data = mexi(ticker=key, limit=10000, timeframe=timeframe)
-                start_point = data.index[-1]
+                    shared_data[key].append(
+                        {
+                            "id": random_id,
+                            "timeframe": timeframe,
+                            "type_pos": type_pos,
+                            "rsi_value": rsi_value,
+                            "start_point": start_point,
+                        }
+                    )
 
-                if key not in shared_data:
-                    print(Fore.RED, 'not exist')
-                    shared_data[key] = []  # Initialize list for the ticker
-    
-                # Append new entry for the ticker
-                shared_data[key].append({"id": random_id, "timeframe": timeframe, "type_pos": type_pos, "rsi_value": rsi_value, "start_point": start_point})
-                print(f"{Fore.GREEN}Added for RSI tracking: {key} -> {shared_data[key][-1]}{Fore.WHITE}")
+                    # for values in shared_data[key]:
+                    #     print("T", values[0]["timeframe"])
 
-            # Start tracking RSI in a separate thread
-            t = threading.Thread(target=track_rsi, args=(key, timeframe, type_pos, rsi_value, start_point, random_id))
-            t.start()
-            t.join()  # Ensure we wait for the thread to finish before moving on
+                    # print(
+                    #     f"{Fore.GREEN}Added for RSI tracking: {key} ->👇\n"
+                    #     f" T: {shared_data[key]['timeframe']}   {Fore.WHITE}"
+                    # )
 
-            
-        except ValueError:
-            print(f"{Fore.RED}Invalid input! Use format: TICKER TIMEFRAME TYPE RSI{Fore.WHITE}")
+                # Submit the tracking task to the thread pool
+                executor.submit(
+                    track_rsi,
+                    key,
+                    timeframe,
+                    type_pos,
+                    rsi_value,
+                    start_point,
+                    random_id,
+                )
+
+            except ValueError:
+                print(
+                    f"{Fore.RED}Invalid input! Use format: TICKER TIMEFRAME TYPE RSI{Fore.WHITE}"
+                )
+
+        input_queue.task_done()
 
 
-# Processor function: Continuously processes shared data
-def processor():
+# Function to display shared_data periodically
+def display_shared_data():
     while True:
-        with lock:  # Synchronize access to shared data
-            for key, value in shared_data.items():
+        with lock:
+            if shared_data:
+                print(f"{Fore.CYAN}Currently processing shared_data:{Fore.WHITE}")
+                for key, value in shared_data.items():
+
+                    if len(value) <= 1:
+                        print(
+                            f"{Fore.MAGENTA} {key}[{len(value)}] -> {Fore.WHITE}👇 \n"
+                            f"{Fore.LIGHTGREEN_EX}T:{Fore.WHITE}{value[0]['timeframe']}{Fore.LIGHTRED_EX} |Type{Fore.WHITE}: {value[0]['type_pos']} |Id: {value[0]['id']} |Rsi: {value[0]['rsi_value']}"
+                        )
+
+                    else:
+                        print(
+                            f"{Fore.MAGENTA} {key}[{len(value)}n] -> {Fore.WHITE}👇 \n"
+                        )
+                        for index, i in enumerate(value):
+                            print(
+                                f"{Fore.LIGHTGREEN_EX}T:{Fore.WHITE} {i['timeframe']}{Fore.LIGHTRED_EX} |Type{Fore.WHITE}: {i['type_pos']} |Id: {i['id']} |Rsi: {i['rsi_value']}"
+                            )
+
+            else:
+                print(f"{Fore.CYAN}No data currently being processed.{Fore.WHITE}")
+        time.sleep(5)  # Adjust the interval for how often to display
 
 
-                ticker, timeframe, type_pos, set_rsi, start_point, id = key, value[0]['timeframe'], value[0]['type_pos'], value[0]['rsi_value'], value[0]['start_point'],value[0]['id']
-                track_rsi(ticker, timeframe, type_pos, set_rsi, start_point, id)
-                
-                for entry in value:
-                    print(f"{Fore.LIGHTYELLOW_EX}Processing {Fore.MAGENTA}{key}{Fore.LIGHTYELLOW_EX} with params => T:{entry['timeframe']}| type:{entry['type_pos']}| set_rsi:{entry['rsi_value']}| id:{entry['id']} <= \{Fore.WHITE}")
+# Scheduler function: Periodically re-run track_rsi tasks
+def scheduler():
+    while True:
+        with lock:
+            for ticker, entries in shared_data.items():
+                for entry in entries:
+                    executor.submit(
+                        track_rsi,
+                        ticker,
+                        entry["timeframe"],
+                        entry["type_pos"],
+                        entry["rsi_value"],
+                        entry["start_point"],
+                        entry["id"],
+                    )
+        time.sleep(5 * 60)  # Run every 5 seconds
 
-        time.sleep(5)  # Wait before re-checking
 
-# Main function to start threads
+# Main function: Start the listener, worker, display, and scheduler threads
 def main():
     listener_thread = threading.Thread(target=listener, daemon=True)
-    processor_thread = threading.Thread(target=processor, daemon=True)
+    worker_thread = threading.Thread(target=worker, daemon=True)
+    display_thread = threading.Thread(
+        target=display_shared_data, daemon=True
+    )  # New thread for displaying shared_data
+    scheduler_thread = threading.Thread(
+        target=scheduler, daemon=True
+    )  # New thread for scheduling tasks
 
     listener_thread.start()
-    processor_thread.start()
+    worker_thread.start()
+    display_thread.start()  # Start the display thread
+    scheduler_thread.start()  # Start the scheduler thread
 
-    listener_thread.join()  # Wait for listener thread to complete
+    listener_thread.join()
+    worker_thread.join()
+    display_thread.join()
+    scheduler_thread.join()
+
 
 # Run the program
 if __name__ == "__main__":
