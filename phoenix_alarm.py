@@ -18,14 +18,30 @@ executor = ThreadPoolExecutor(max_workers=10)  # Adjust max_workers as needed
 # Queue for input processing
 input_queue = Queue()
 
-forex_pair = ["GBPUSD", "EURUSD", "AUDUSD", "USDCAD", "USDJPY", "GBPJPY", "NZDUSD"]
+forex_pair = [
+    "GBPUSD",
+    "EURUSD",
+    "AUDUSD",
+    "USDCAD",
+    "USDJPY",
+    "GBPJPY",
+    "NZDUSD",
+    "XAUUSD",
+]
+
+
+def show_the_list():
+    for key, value in shared_data.items():
+        print(
+            f" {Fore.BLUE} Key: {key} {Fore.WHITE} has {Fore.RED}{len(value)} {Fore.WHITE} items \n "
+        )
 
 
 def define_symbol_market_data(ticker, timeframe):
     try:
 
         if ticker.upper() in forex_pair:
-            data = forex(ticker="GBPUSD=X", timeframe=5)
+            data = forex(ticker=f"{ticker}=X", timeframe=5)
         else:
             data = mexi(ticker=ticker, limit=10000, timeframe=timeframe)
 
@@ -54,6 +70,7 @@ def track_rsi(ticker, timeframe, type_pos, set_rsi, start_point, id):
 
         # Loop through each index of the sliced data
         for i in sample.index:
+
             rsi = sample.loc[i]["rsi"]
 
             if type_pos.upper() == "SHORT" and rsi >= set_rsi:
@@ -96,6 +113,7 @@ def track_rsi(ticker, timeframe, type_pos, set_rsi, start_point, id):
 # Listener function: Enqueue user inputs
 def listener():
     while True:
+
         user_input = input("Enter a Ticker (e.g., TICKER TIMEFRAME TYPE RSI): ").strip()
         input_queue.put(user_input)
 
@@ -112,6 +130,9 @@ def worker():
                     print(f"Deleted: {key_to_delete}")
                 else:
                     print(f"Key '{key_to_delete}' not found.")
+
+        elif user_input.startswith("show"):
+            show_the_list()
         else:
             try:
                 random_id = random.randint(1000, 9999)
@@ -188,13 +209,14 @@ def display_shared_data():
 
             else:
                 print(f"{Fore.CYAN}No data currently being processed.{Fore.WHITE}")
-        time.sleep(5)  # Adjust the interval for how often to display
+        time.sleep(5 * 12)  # Adjust the interval for how often to display
 
 
 # Scheduler function: Periodically re-run track_rsi tasks
 def scheduler():
     while True:
         with lock:
+            print("processing!")
             for ticker, entries in shared_data.items():
                 for entry in entries:
                     executor.submit(
